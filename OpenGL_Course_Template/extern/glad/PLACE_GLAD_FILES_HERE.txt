@@ -1,0 +1,5 @@
+Place generated GLAD files here:
+
+extern/glad/include/glad/glad.h
+extern/glad/include/KHR/khrplatform.h
+extern/glad/src/glad.c
