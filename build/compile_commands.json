@@ -1,0 +1,14 @@
+[
+{
+  "directory": "D:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/build",
+  "command": "C:\\mingw64\\bin\\g++.exe -DCOURSE_DEMO=1 -DGLFW_DLL -DGLFW_INCLUDE_NONE=1 -ID:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/src -ID:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/extern/glad/include -ID:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/extern/stb -isystem C:/tools/vcpkg/installed/x64-mingw-dynamic/include -g -std=c++17 -o CMakeFiles\\opengl_course.dir\\src\\weeks\\mirror_room.cpp.obj -c D:\\OpenGL\\Group4_Graphics\\Project-Graphics\\OpenGL_Course_Template\\src\\weeks\\mirror_room.cpp",
+  "file": "D:\\OpenGL\\Group4_Graphics\\Project-Graphics\\OpenGL_Course_Template\\src\\weeks\\mirror_room.cpp",
+  "output": "CMakeFiles\\opengl_course.dir\\src\\weeks\\mirror_room.cpp.obj"
+},
+{
+  "directory": "D:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/build",
+  "command": "C:\\mingw64\\bin\\gcc.exe -DCOURSE_DEMO=1 -DGLFW_DLL -DGLFW_INCLUDE_NONE=1 -ID:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/src -ID:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/extern/glad/include -ID:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/extern/stb -isystem C:/tools/vcpkg/installed/x64-mingw-dynamic/include -g -o CMakeFiles\\opengl_course.dir\\extern\\glad\\src\\glad.c.obj -c D:\\OpenGL\\Group4_Graphics\\Project-Graphics\\OpenGL_Course_Template\\extern\\glad\\src\\glad.c",
+  "file": "D:\\OpenGL\\Group4_Graphics\\Project-Graphics\\OpenGL_Course_Template\\extern\\glad\\src\\glad.c",
+  "output": "CMakeFiles\\opengl_course.dir\\extern\\glad\\src\\glad.c.obj"
+}
+]

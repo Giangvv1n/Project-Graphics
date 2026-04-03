@@ -1,3 +1,0 @@
-D:/C++/code/OpenGL_Course_Template/build/CMakeFiles/opengl_course.dir
-D:/C++/code/OpenGL_Course_Template/build/CMakeFiles/edit_cache.dir
-D:/C++/code/OpenGL_Course_Template/build/CMakeFiles/rebuild_cache.dir

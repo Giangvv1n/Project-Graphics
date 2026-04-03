@@ -1,0 +1,8 @@
+# ninja log v6
+29	787	7967945840626238	CMakeFiles/opengl_course.dir/src/App.cpp.obj	77a729c2a8b2bf9f
+36	1265	7967945840697009	CMakeFiles/opengl_course.dir/src/core/Shader.cpp.obj	1b062273e20cec93
+21	1332	7967945840543622	CMakeFiles/opengl_course.dir/src/main.cpp.obj	e2bda54d47d06303
+49	1445	7967945840819136	CMakeFiles/opengl_course.dir/extern/glad/src/glad.c.obj	a48c993cb822312a
+43	1621	7967945840756805	CMakeFiles/opengl_course.dir/src/weeks/Lighting.cpp.obj	e95a1e97da591aa
+2036	4659	7968413456890353	opengl_course.exe	4744defc566dc1f5
+7	2035	7968413436587096	CMakeFiles/opengl_course.dir/src/weeks/mirror_room.cpp.obj	dc188cee44547e68
