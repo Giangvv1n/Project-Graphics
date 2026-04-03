@@ -1,314 +1,297 @@
-#include "weeks/Lighting.h"
+// ==========================
+// OpenGL STL Viewer
+// Binary + ASCII STL
+// ==========================
 
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include <fstream>
 #include <iostream>
-#include <limits>
-#include <cstdint>
-#include <GLFW/glfw3.h>
-#include <cmath>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <string>
+#include <cfloat>
 
-namespace {
-#pragma pack(push, 1)
-    struct STLTriangle {
-        float normal[3];
-        float v1[3];
-        float v2[3];
-        float v3[3];
-        uint16_t attrByteCount;
-    };
-#pragma pack(pop)
-}
+// ==========================
+// SETTINGS
+// ==========================
+const unsigned int SCR_WIDTH = 1280;
+const unsigned int SCR_HEIGHT = 720;
 
-bool Lighting::init() {
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-    glPointSize(6.0f);
-    std::cout << "Lighting + STL model\n";
+// ==========================
+// CAMERA
+// ==========================
+glm::vec3 cameraPos(0,0,3);
+glm::vec3 cameraFront(0,0,-1);
+glm::vec3 cameraUp(0,1,0);
 
-    glEnable(GL_DEPTH_TEST);
+float yaw = -90.0f, pitch = 0.0f;
+float lastX = 640, lastY = 360;
+bool firstMouse = true;
+float fov = 45.0f;
 
-    GLFWwindow* window = glfwGetCurrentContext();
-    if (window) {
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-    }
-    if (!m_shader.loadFromFiles(
-        "assets/shaders/model.vert",
-        "assets/shaders/model.frag")) {
-        std::cerr << "Failed to load week05 shaders.\n";
-        return false;
-    }
+float deltaTime = 0, lastFrame = 0;
+float speed = 5.0f;
 
-    if (!loadBinarySTL("assets/models/L room-BodyPocket001.stl")) {
-        std::cerr << "Failed to load STL model.\n";
-        return false;
-    }
+// ==========================
+// INPUT
+// ==========================
+void mouse_callback(GLFWwindow*, double xpos, double ypos)
+{
+    if (firstMouse){ lastX = xpos; lastY = ypos; firstMouse = false; }
 
-    setupMesh();
-    return true;
-}
+    float xoffset = xpos - lastX;
+    float yoffset = lastY - ypos;
+    lastX = xpos; lastY = ypos;
 
-void Lighting::update(float dt) {
-    m_time += dt;
+    float sens = 0.1f;
+    xoffset *= sens; yoffset *= sens;
 
-    GLFWwindow* window = glfwGetCurrentContext();
-    if (!window) return;
+    yaw += xoffset;
+    pitch += yoffset;
 
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-    m_cameraDistance -= 3.0f * dt;
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
-        m_cameraDistance += 3.0f * dt;
-
-    if (m_cameraDistance < 1.0f)  m_cameraDistance = 1.0f;
-    if (m_cameraDistance > 30.0f) m_cameraDistance = 30.0f;
-    double xpos, ypos;
-    glfwGetCursorPos(window, &xpos, &ypos);
-
-    if (m_firstMouse) {
-        m_lastX = static_cast<float>(xpos);
-        m_lastY = static_cast<float>(ypos);
-        m_firstMouse = false;
-    }
-
-    float xoffset = static_cast<float>(xpos) - m_lastX;
-    float yoffset = m_lastY - static_cast<float>(ypos); // đảo chiều Y cho tự nhiên
-    m_lastX = static_cast<float>(xpos);
-    m_lastY = static_cast<float>(ypos);
-
-    float sensitivity = 0.1f;
-    xoffset *= sensitivity;
-    yoffset *= sensitivity;
-
-    m_yaw += xoffset;
-    m_pitch += yoffset;
-
-    if (m_pitch > 89.0f) m_pitch = 89.0f;
-    if (m_pitch < -89.0f) m_pitch = -89.0f;
+    if (pitch > 89) pitch = 89;
+    if (pitch < -89) pitch = -89;
 
     glm::vec3 front;
-    front.x = cos(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
-    front.y = sin(glm::radians(m_pitch));
-    front.z = sin(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));
-    m_cameraFront = glm::normalize(front);
-    // camera chuột
-    float cameraSpeed = 3.0f * dt;
-
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        m_cameraPos += cameraSpeed * m_cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        m_cameraPos -= cameraSpeed * m_cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        m_cameraPos -= glm::normalize(glm::cross(m_cameraFront, m_cameraUp)) * cameraSpeed;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        m_cameraPos += glm::normalize(glm::cross(m_cameraFront, m_cameraUp)) * cameraSpeed;
+    front.x = cos(glm::radians(yaw))*cos(glm::radians(pitch));
+    front.y = sin(glm::radians(pitch));
+    front.z = sin(glm::radians(yaw))*cos(glm::radians(pitch));
+    cameraFront = glm::normalize(front);
 }
 
-void Lighting::render() {
-    glDisable(GL_SCISSOR_TEST);
-    glViewport(0, 0, 800, 800);
-
-    glClearColor(0.08f, 0.08f, 0.10f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    m_shader.use();
-
-    glm::mat4 translateMat =
-        glm::translate(glm::mat4(1.0f), glm::vec3(-m_centerX, -m_centerY, -m_centerZ));
-
-    glm::mat4 scaleMat =
-        glm::scale(glm::mat4(1.0f), glm::vec3(m_modelScale));
-
-    glm::mat4 rotateY =
-        glm::rotate(glm::mat4(1.0f), m_time * 0.8f, glm::vec3(0.0f, 1.0f, 0.0f));
-
-    glm::mat4 rotateX =
-        glm::rotate(glm::mat4(1.0f), glm::radians(-25.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-
-    glm::mat4 model = scaleMat * translateMat;
-
-    m_cameraPos = -m_cameraFront * m_cameraDistance;
-
-    glm::vec3 target(0.0f, 0.0f, 0.0f);
-    m_cameraPos = target - m_cameraFront * m_cameraDistance;
-
-    glm::mat4 view = glm::lookAt(
-        m_cameraPos,
-        target,
-        m_cameraUp
-    );
-
-    glm::mat4 projection = glm::perspective(
-        glm::radians(45.0f),
-        1.0f,
-        0.1f,
-        100.0f  
-
-);
-
-   
-    GLint modelLoc = glGetUniformLocation(m_shader.id(), "uModel");
-    GLint viewLoc  = glGetUniformLocation(m_shader.id(), "uView");
-    GLint projLoc  = glGetUniformLocation(m_shader.id(), "uProjection");
-
-    if (modelLoc >= 0) glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-    if (viewLoc  >= 0) glUniformMatrix4fv(viewLoc,  1, GL_FALSE, glm::value_ptr(view));
-    if (projLoc  >= 0) glUniformMatrix4fv(projLoc,  1, GL_FALSE, glm::value_ptr(projection));
-
-    glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(model)));
-    GLint normalLoc = glGetUniformLocation(m_shader.id(), "uNormalMatrix");
-    if (normalLoc >= 0) {
-        glUniformMatrix3fv(normalLoc, 1, GL_FALSE, glm::value_ptr(normalMatrix));
-    }
-
-    GLint lightDirLoc   = glGetUniformLocation(m_shader.id(), "uLightDir");
-    GLint viewPosLoc    = glGetUniformLocation(m_shader.id(), "uViewPos");
-    GLint objColorLoc   = glGetUniformLocation(m_shader.id(), "uObjectColor");
-    GLint lightColorLoc = glGetUniformLocation(m_shader.id(), "uLightColor");
-
-    if (lightDirLoc >= 0)   glUniform3f(lightDirLoc, -0.6f, -1.0f, -0.4f);
-    if (viewPosLoc >= 0) glUniform3f(viewPosLoc, m_cameraPos.x, m_cameraPos.y, m_cameraPos.z);
-    if (objColorLoc >= 0)   glUniform3f(objColorLoc, 0.82f, 0.82f, 0.86f);
-    if (lightColorLoc >= 0) glUniform3f(lightColorLoc, 1.0f, 1.0f, 1.0f);
-
-    glBindVertexArray(m_vao);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_vertices.size()));
-    glBindVertexArray(0);
+void scroll_callback(GLFWwindow*, double, double yoffset)
+{
+    fov -= yoffset;
+    if (fov < 1) fov = 1;
+    if (fov > 90) fov = 90;
 }
-bool Lighting::loadBinarySTL(const std::string& path) {
+
+void processInput(GLFWwindow* window)
+{   
+    // thoát chương trình
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, true);
+
+    float v = speed * deltaTime;
+    glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
+    glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
+    // WASD
+    if (glfwGetKey(window, GLFW_KEY_W)==GLFW_PRESS) cameraPos += v*cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_S)==GLFW_PRESS) cameraPos -= v*cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_A)==GLFW_PRESS) cameraPos -= right*v;
+    if (glfwGetKey(window, GLFW_KEY_D)==GLFW_PRESS) cameraPos += right*v;
+
+     // Q/E lên xuống
+    if (glfwGetKey(window, GLFW_KEY_Q)==GLFW_PRESS) cameraPos += v*worldUp;
+    if (glfwGetKey(window, GLFW_KEY_E)==GLFW_PRESS) cameraPos -= v*worldUp;
+}
+
+// ==========================
+// SHADER
+// ==========================
+unsigned int createShader()
+{
+    const char* vs = R"(#version 330 core
+    layout (location=0) in vec3 aPos;
+    layout (location=1) in vec3 aNormal;
+
+    out vec3 FragPos;
+    out vec3 Normal;
+
+    uniform mat4 model, view, projection;
+
+    void main(){
+        FragPos = vec3(model*vec4(aPos,1));
+        Normal = mat3(transpose(inverse(model)))*aNormal;
+        gl_Position = projection*view*vec4(FragPos,1);
+    })";
+
+    const char* fs = R"(#version 330 core
+    out vec4 FragColor;
+    in vec3 FragPos;
+    in vec3 Normal;
+
+    uniform vec3 lightPos;
+    uniform vec3 viewPos;
+
+    void main(){
+        vec3 norm = normalize(Normal);
+        vec3 lightDir = normalize(lightPos - FragPos);
+
+        float diff = max(dot(norm, lightDir), 0.0);
+
+        vec3 viewDir = normalize(viewPos - FragPos);
+        vec3 halfway = normalize(lightDir + viewDir);
+        float spec = pow(max(dot(norm, halfway), 0.0), 32);
+
+        vec3 color = (0.2 + diff + 0.5*spec) * vec3(0.8,0.6,0.3);
+        FragColor = vec4(color,1);
+    })";
+
+    auto compile = [](GLenum type, const char* src){
+        unsigned int s = glCreateShader(type);
+        glShaderSource(s,1,&src,nullptr);
+        glCompileShader(s);
+        return s;
+    };
+
+    unsigned int v = compile(GL_VERTEX_SHADER, vs);
+    unsigned int f = compile(GL_FRAGMENT_SHADER, fs);
+
+    unsigned int p = glCreateProgram();
+    glAttachShader(p,v);
+    glAttachShader(p,f);
+    glLinkProgram(p);
+
+    glDeleteShader(v); glDeleteShader(f);
+    return p;
+}
+
+// ==========================
+// LOAD BINARY STL
+// ==========================
+bool loadBinarySTL(const std::string& path, std::vector<float>& data)
+{
     std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        std::cerr << "Cannot open STL file: " << path << "\n";
-        return false;
-    }
+    if (!file) return false;
 
     char header[80];
     file.read(header, 80);
 
-    uint32_t triangleCount = 0;
-    file.read(reinterpret_cast<char*>(&triangleCount), sizeof(uint32_t));
+    uint32_t triCount;
+    file.read(reinterpret_cast<char*>(&triCount), 4);
 
-    if (!file || triangleCount == 0) {
-        std::cerr << "Invalid STL or empty STL: " << path << "\n";
-        return false;
-    }
+    for (uint32_t i=0;i<triCount;i++)
+    {
+        float nx,ny,nz;
+        file.read((char*)&nx,4);
+        file.read((char*)&ny,4);
+        file.read((char*)&nz,4);
 
-    m_vertices.clear();
-    m_vertices.reserve(static_cast<size_t>(triangleCount) * 3);
+        glm::vec3 v[3];
+        for (int j=0;j<3;j++)
+            file.read((char*)&v[j],12);
 
-    float minX = std::numeric_limits<float>::max();
-    float minY = std::numeric_limits<float>::max();
-    float minZ = std::numeric_limits<float>::max();
-    float maxX = std::numeric_limits<float>::lowest();
-    float maxY = std::numeric_limits<float>::lowest();
-    float maxZ = std::numeric_limits<float>::lowest();
+        file.ignore(2);
 
-    for (uint32_t i = 0; i < triangleCount; ++i) {
-        STLTriangle tri{};
-        file.read(reinterpret_cast<char*>(&tri), sizeof(STLTriangle));
-        if (!file) {
-            std::cerr << "Error while reading STL triangle #" << i << "\n";
-            return false;
-        }
+        glm::vec3 normal = glm::normalize(glm::cross(v[1]-v[0], v[2]-v[0]));
 
-        Vertex a{ tri.v1[0], tri.v1[1], tri.v1[2], tri.normal[0], tri.normal[1], tri.normal[2] };
-        Vertex b{ tri.v2[0], tri.v2[1], tri.v2[2], tri.normal[0], tri.normal[1], tri.normal[2] };
-        Vertex c{ tri.v3[0], tri.v3[1], tri.v3[2], tri.normal[0], tri.normal[1], tri.normal[2] };
-
-        m_vertices.push_back(a);
-        m_vertices.push_back(b);
-        m_vertices.push_back(c);
-
-        const Vertex verts[3] = { a, b, c };
-        for (const auto& v : verts) {
-            if (v.px < minX) minX = v.px;
-            if (v.py < minY) minY = v.py;
-            if (v.pz < minZ) minZ = v.pz;
-            if (v.px > maxX) maxX = v.px;
-            if (v.py > maxY) maxY = v.py;
-            if (v.pz > maxZ) maxZ = v.pz;
+        for (int j=0;j<3;j++)
+        {
+            data.insert(data.end(), {v[j].x,v[j].y,v[j].z, normal.x,normal.y,normal.z});
         }
     }
-
-    // Tính tâm model
-    m_centerX = (minX + maxX) * 0.5f;
-    m_centerY = (minY + maxY) * 0.5f;
-    m_centerZ = (minZ + maxZ) * 0.5f;
-
-    // Scale để kích thước lớn nhất ~ 2 đơn vị
-    float sizeX = maxX - minX;
-    float sizeY = maxY - minY;
-    float sizeZ = maxZ - minZ;
-    float maxSize = std::max(sizeX, std::max(sizeY, sizeZ));
-
-    if (maxSize > 0.00001f) {
-        m_modelScale = 2.0f / maxSize;
-    } else {
-        m_modelScale = 1.0f;
-    }
-
-    std::cout << "Loaded binary STL: " << path << "\n";
-    std::cout << "Triangles: " << triangleCount << "\n";
-    std::cout << "Vertices: " << m_vertices.size() << "\n";
-
-        std::cout << "min: " << minX << ", " << minY << ", " << minZ << "\n";
-    std::cout << "max: " << maxX << ", " << maxY << ", " << maxZ << "\n";
-    std::cout << "size: " << sizeX << ", " << sizeY << ", " << sizeZ << "\n";
-    std::cout << "maxSize: " << maxSize << "\n";
-    std::cout << "modelScale: " << m_modelScale << "\n";
-    std::cout << "center: " << m_centerX << ", " << m_centerY << ", " << m_centerZ << "\n";
-
     return true;
 }
 
-void Lighting::setupMesh() {
-    if (m_vao) {
-        cleanup();
+// ==========================
+// AUTO CENTER + SCALE
+// ==========================
+void normalizeModel(std::vector<float>& v)
+{
+    glm::vec3 min(FLT_MAX), max(-FLT_MAX);
+
+    for (int i=0;i<v.size();i+=6)
+    {
+        glm::vec3 p(v[i],v[i+1],v[i+2]);
+        min = glm::min(min,p);
+        max = glm::max(max,p);
     }
 
-    glGenVertexArrays(1, &m_vao);
-    glGenBuffers(1, &m_vbo);
+    glm::vec3 center = (min+max)*0.5f;
+    float scale = 1.5f / glm::length(max-min);
 
-    glBindVertexArray(m_vao);
-
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(
-        GL_ARRAY_BUFFER,
-        static_cast<GLsizeiptr>(m_vertices.size() * sizeof(Vertex)),
-        m_vertices.data(),
-        GL_STATIC_DRAW
-    );
-
-    // location = 0 -> position
-    glVertexAttribPointer(
-        0, 3, GL_FLOAT, GL_FALSE,
-        sizeof(Vertex),
-        reinterpret_cast<void*>(offsetof(Vertex, px))
-    );
-    glEnableVertexAttribArray(0);
-
-    // location = 1 -> normal
-    glVertexAttribPointer(
-        1, 3, GL_FLOAT, GL_FALSE,
-        sizeof(Vertex),
-        reinterpret_cast<void*>(offsetof(Vertex, nx))
-    );
-    glEnableVertexAttribArray(1);
-
-    glBindVertexArray(0);
+    for (int i=0;i<v.size();i+=6)
+    {
+        v[i]   = (v[i]-center.x)*scale;
+        v[i+1] = (v[i+1]-center.y)*scale;
+        v[i+2] = (v[i+2]-center.z)*scale;
+    }
 }
 
-void Lighting::cleanup() {
-    if (m_vbo) {
-        glDeleteBuffers(1, &m_vbo);
-        m_vbo = 0;
+// ==========================
+// MAIN
+// ==========================
+int main()
+{
+    glfwInit();
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH,SCR_HEIGHT,"STL Viewer",NULL,NULL);
+    glfwMakeContextCurrent(window);
+
+    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetScrollCallback(window, scroll_callback);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+    glEnable(GL_DEPTH_TEST);
+
+    unsigned int shader = createShader();
+
+    std::vector<float> vertices;
+
+    if (!loadBinarySTL("assets/models/L room-BodyPocket001.stl", vertices))
+    {
+        std::cout << "Load STL failed!\n";
+        return -1;
     }
-    if (m_vao) {
-        glDeleteVertexArrays(1, &m_vao);
-        m_vao = 0;
+
+    normalizeModel(vertices);
+
+    std::cout << "Triangles: " << vertices.size()/18 << std::endl;
+
+    unsigned int VAO,VBO;
+    glGenVertexArrays(1,&VAO);
+    glGenBuffers(1,&VBO);
+
+    glBindVertexArray(VAO);
+    glBindBuffer(GL_ARRAY_BUFFER,VBO);
+    glBufferData(GL_ARRAY_BUFFER,vertices.size()*4,vertices.data(),GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,6*sizeof(float),(void*)0);
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1,3,GL_FLOAT,GL_FALSE,6*sizeof(float),(void*)(3*sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    while (!glfwWindowShouldClose(window))
+    {
+        float time = glfwGetTime();
+        deltaTime = time - lastFrame;
+        lastFrame = time;
+
+        processInput(window);
+
+        glClearColor(0.1,0.1,0.15,1);
+        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+
+        glUseProgram(shader);
+
+        glm::mat4 model(20.0f);
+        model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(1,0,0));
+        glm::mat4 view = glm::lookAt(cameraPos, cameraPos+cameraFront, cameraUp);
+        glm::mat4 proj = glm::perspective(glm::radians(fov), (float)SCR_WIDTH/SCR_HEIGHT, 0.1f, 100.0f);
+
+        glUniformMatrix4fv(glGetUniformLocation(shader,"model"),1,0,glm::value_ptr(model));
+        glUniformMatrix4fv(glGetUniformLocation(shader,"view"),1,0,glm::value_ptr(view));
+        glUniformMatrix4fv(glGetUniformLocation(shader,"projection"),1,0,glm::value_ptr(proj));
+
+        glUniform3f(glGetUniformLocation(shader,"lightPos"),5,5,5);
+        glUniform3fv(glGetUniformLocation(shader,"viewPos"),1,glm::value_ptr(cameraPos));
+
+        glBindVertexArray(VAO);
+        glDrawArrays(GL_TRIANGLES,0,vertices.size()/6);
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
     }
+
+    glfwTerminate();
 }

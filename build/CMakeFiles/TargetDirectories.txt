@@ -1,3 +1,0 @@
-D:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/build/CMakeFiles/opengl_course.dir
-D:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/build/CMakeFiles/edit_cache.dir
-D:/OpenGL/Group4_Graphics/Project-Graphics/OpenGL_Course_Template/build/CMakeFiles/rebuild_cache.dir
