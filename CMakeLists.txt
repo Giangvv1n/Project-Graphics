@@ -18,6 +18,7 @@ add_executable(opengl_course
     # src/core/Shader.cpp
     # src/weeks/Lighting.cpp
     # extern/glad/src/glad.c
+    
     src/weeks/mirror_room.cpp
 )
 
