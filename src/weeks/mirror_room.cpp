@@ -234,7 +234,7 @@ uniform float npcRadius;
 uniform mat4 view;
 uniform mat4 projection;
 
-#define MAX_BOUNCES 6
+#define MAX_BOUNCES 12
 
 float hitSegment(vec2 o, vec2 d, vec2 a, vec2 b, out vec3 normal) {
     vec2 v = b - a;
@@ -401,7 +401,8 @@ void main() {
         
         if (hit.type == 3) {
             if (i == MAX_BOUNCES) {
-                hit.type = 5; 
+                color += attenuation * vec3(0.01, 0.01, 0.015); // Fade to dark
+                break;
             } else {
                 vec3 L;
                 float currentSpotIntensity;
