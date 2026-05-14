@@ -7,12 +7,10 @@
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>
 
-
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -24,7 +22,6 @@
 #include <iostream>
 #include <string>
 #include <vector>
-
 
 #ifdef _WIN32
 #include <windows.h>
@@ -283,7 +280,7 @@ struct Hit {
     int id; // segment ID
 };
 
-Hit map(vec3 ro, vec3 rd, bool isPrimary) {
+Hit map(vec3 ro, vec3 rd, int rayType, vec3 pPos1, vec3 pPos2) {
     Hit hit;
     hit.t = 1e20;
     hit.type = 0;
@@ -301,7 +298,7 @@ Hit map(vec3 ro, vec3 rd, bool isPrimary) {
     if (rd.y > 1e-6) {
         float t = (ceilY - ro.y) / rd.y;
         if (t > 1e-4 && t < hit.t) {
-            if (!isPrimary) {
+            if (rayType != 0) {
                 hit.t = t;
                 hit.normal = vec3(0, -1, 0);
                 hit.type = 2;
@@ -328,14 +325,22 @@ Hit map(vec3 ro, vec3 rd, bool isPrimary) {
     }
     
     bool hitBall = true;
-    if (isPrimary && !isCCTV) {
-        hitBall = false; // Ẩn quả bóng chính ở góc nhìn FPS để không che camera
+    if (rayType == 0 && !isCCTV) {
+        hitBall = false; // Ẩn quả bóng ở góc nhìn FPS để không che camera
     }
+    // Không ẩn bóng cho rayType == 2 nữa, quả bóng sẽ đổ bóng chuẩn vật lý lên mọi nơi (cả sàn và trần)
     
     if (hitBall) {
+        vec3 n1, n2;
+        float t1 = hitSphere(ro, rd, pPos1, playerRadius, n1);
+        float t2 = hitSphere(ro, rd, pPos2, playerRadius, n2);
+        
+        float tBall = 1e20;
         vec3 nBall;
-        float tBall = hitSphere(ro, rd, playerPos, playerRadius, nBall);
-        if (tBall > 1e-4 && tBall < hit.t) {
+        if (t1 > 1e-4 && t1 < tBall) { tBall = t1; nBall = n1; }
+        if (t2 > 1e-4 && t2 < tBall) { tBall = t2; nBall = n2; }
+        
+        if (tBall < hit.t) {
             hit.t = tBall;
             hit.normal = nBall;
             hit.type = 4;
@@ -362,19 +367,58 @@ void main() {
     vec3 ro = cameraPos;
     vec3 rd = getRayDirection(uv);
     
+    // --- BƯỚC 1: TÍNH TOÁN CÁC NGUỒN SÁNG ẢO (GI) TỪ ĐÈN PIN ---
+    vec3 vSpotPos[12];
+    vec3 vSpotDir[12];
+    vec3 vPlayerPos[12];
+    float vSpotAtten[12];
+    int numSpotBounces = 0;
+    
+    vec3 rayP = spotPos;
+    vec3 rayD = normalize(spotDir);
+    vec3 vSp = spotPos;
+    vec3 vSd = rayD;
+    vec3 vPp = playerPos;
+    float cAtten = 1.0;
+    
+    for (int j = 0; j < 12; ++j) {
+        vSpotPos[j] = vSp;
+        vSpotDir[j] = vSd;
+        vPlayerPos[j] = vPp;
+        vSpotAtten[j] = cAtten;
+        numSpotBounces++;
+        
+        Hit lHit = map(rayP, rayD, 1, playerPos, vec3(1e10)); // trace trong không gian thực
+        if (lHit.type == 3) {
+            vec3 hitP = rayP + rayD * lHit.t;
+            vec3 N = lHit.normal;
+            
+            float dSpot = dot(vSp - hitP, N);
+            vSp = vSp - 2.0 * dSpot * N;
+            vSd = reflect(vSd, N);
+            
+            float dPlayer = dot(vPp - hitP, N);
+            vPp = vPp - 2.0 * dPlayer * N;
+            
+            cAtten *= 0.85;
+            
+            rayP = hitP + N * 1e-3;
+            rayD = reflect(rayD, N);
+        } else {
+            break; 
+        }
+    }
+    
     vec3 color = vec3(0.0);
     vec3 attenuation = vec3(1.0);
     
     Hit primaryHit;
     vec3 primaryHitPos;
-
-    vec3 currentSpotPos = spotPos;
-    vec3 currentSpotDir = normalize(spotDir);
     float totalDist = 0.0;
 
     for (int i = 0; i <= MAX_BOUNCES; ++i) {
         bool isPrimary = (i == 0);
-        Hit hit = map(ro, rd, isPrimary);
+        Hit hit = map(ro, rd, isPrimary ? 0 : 1, playerPos, vec3(1e10));
         
         if (isPrimary) {
             primaryHit = hit;
@@ -391,38 +435,40 @@ void main() {
         
         if (hit.type == 3) {
             if (i == MAX_BOUNCES) {
-                color += attenuation * vec3(0.01, 0.01, 0.015); // Fade to dark
+                color += attenuation * vec3(0.01, 0.01, 0.015);
                 break;
             } else {
-                vec3 L = normalize(currentSpotPos - hitPos);
-                float currentDist = length(currentSpotPos - hitPos);
-                float theta = dot(-L, currentSpotDir);
-                float epsilon = cos(radians(25.0)) - cos(radians(35.0));
-                float currentSpotIntensity = clamp((theta - cos(radians(35.0))) / epsilon, 0.0, 1.0);
+                vec3 N = hit.normal;
+                vec3 V = -rd;
+                vec3 mirrorDirect = vec3(0.0);
                 
-                float shadowFactor = 1.0;
-                if (currentSpotIntensity > 0.0) {
-                    Hit shadowHit = map(hitPos + hit.normal * 1e-3, L, false);
-                    if (shadowHit.type != 0 && shadowHit.type != 3 && shadowHit.t < currentDist) {
-                        shadowFactor = 0.0;
+                // Tính highlight gương từ tất cả các nguồn sáng ảo
+                for (int j = 0; j < numSpotBounces; ++j) {
+                    vec3 L = normalize(vSpotPos[j] - hitPos);
+                    float currentDist = length(vSpotPos[j] - hitPos);
+                    float theta = dot(-L, vSpotDir[j]);
+                    float epsilon = cos(radians(25.0)) - cos(radians(35.0));
+                    float currentSpotIntensity = clamp((theta - cos(radians(35.0))) / epsilon, 0.0, 1.0);
+                    
+                    if (currentSpotIntensity > 0.0) {
+                        float shadowFactor = 1.0;
+                        vec3 shadowRo = hitPos + N * 1e-3; 
+                        Hit shadowHit = map(shadowRo, L, 2, playerPos, vPlayerPos[j]);
+                        if (shadowHit.type != 0 && shadowHit.type != 3 && shadowHit.t < currentDist) {
+                            shadowFactor = 0.0;
+                        }
+                        
+                        vec3 reflectDir = reflect(-L, N);
+                        float spec = pow(max(dot(V, reflectDir), 0.0), 256.0); 
+                        float lightAtten = 1.0 / (1.0 + 0.05 * currentDist + 0.05 * (currentDist * currentDist));
+                        
+                        mirrorDirect += spec * vec3(1.0) * currentSpotIntensity * shadowFactor * lightAtten * vSpotAtten[j];
                     }
                 }
-                
-                vec3 viewDir = -rd; 
-                vec3 reflectDir = reflect(-L, hit.normal);
-                float spec = pow(max(dot(viewDir, reflectDir), 0.0), 256.0); 
-                
-                float lightAtten = 1.0 / (1.0 + 0.05 * currentDist + 0.05 * (currentDist * currentDist));
-                color += attenuation * (spec * vec3(1.0) * currentSpotIntensity * shadowFactor * lightAtten);
+                color += attenuation * mirrorDirect;
                 
                 ro = hitPos + hit.normal * 1e-3;
                 rd = reflect(rd, hit.normal);
-                
-                // Phản xạ nguồn sáng qua gương để tính toán ánh sáng dội lại (True Physical Bounced Light)
-                float d = dot(currentSpotPos - hitPos, hit.normal);
-                currentSpotPos = currentSpotPos - 2.0 * d * hit.normal;
-                currentSpotDir = reflect(currentSpotDir, hit.normal);
-                
                 attenuation *= 0.85; 
                 continue;
             }
@@ -437,14 +483,6 @@ void main() {
                 vec2 uvTex = vec2(hitPos.x, hitPos.z) * 0.5;
                 objColor = texture(floorTexture, uvTex).rgb;
                 specStrength = 0.1;
-                
-                // Đổ bóng dưới chân (Contact Shadow)
-                float dPlayer = length(hitPos.xz - playerPos.xz);
-                if (dPlayer < playerRadius * 2.5) {
-                    float shadow = smoothstep(playerRadius * 0.6, playerRadius * 2.5, dPlayer);
-                    objColor *= mix(0.1, 1.0, shadow);
-                }
-
             }
             else if (hit.type == 2) {
                 objColor = vec3(0.6, 0.6, 0.6); 
@@ -454,33 +492,23 @@ void main() {
                 objColor = vec3(1.0, 0.2, 0.2); 
                 shininess = 64.0;
             }
-
             else if (hit.type == 5) {
                 objColor = vec3(0.3, 0.4, 0.5); 
                 shininess = 128.0; 
                 specStrength = 0.8;
             }
             
+            float dPlayer = length(hitPos - playerPos);
+            float aoRadius = playerRadius * 4.5; 
+            if (dPlayer < aoRadius) {
+                float shadow = smoothstep(playerRadius * 0.9, aoRadius, dPlayer);
+                objColor *= mix(0.15, 1.0, shadow);
+            }
+            
             vec3 N = hit.normal;
             vec3 V = -rd; 
             vec3 texColor = objColor;
             
-            vec3 L = normalize(currentSpotPos - hitPos);
-            float currentDist = length(currentSpotPos - hitPos);
-            float theta = dot(-L, currentSpotDir);
-            float epsilon = cos(radians(25.0)) - cos(radians(35.0));
-            float currentSpotIntensity = clamp((theta - cos(radians(35.0))) / epsilon, 0.0, 1.0);
-            
-            float shadowFactor = 1.0;
-            if (currentSpotIntensity > 0.0) {
-                vec3 shadowRo = hitPos + N * 1e-3; 
-                Hit shadowHit = map(shadowRo, L, false);
-                if (shadowHit.type != 0 && shadowHit.type != 3 && shadowHit.t < currentDist) {
-                    shadowFactor = 0.0;
-                }
-            }
-            
-            // Tính toán ánh sáng môi trường (Ambient)
             vec3 uAmbientColor = vec3(0.01, 0.01, 0.01); 
             vec3 uLightColor   = vec3(1.0, 1.0, 1.0);  
             
@@ -503,33 +531,53 @@ void main() {
             );
             for(int k=0; k<4; k++) {
                 vec3 aoDir = normalize(N + aoDirs[k]*0.5); 
-                Hit aoHit = map(hitPos + N * 1e-3, aoDir, false);
+                Hit aoHit = map(hitPos + N * 1e-3, aoDir, 1, playerPos, vec3(1e10));
                 if(aoHit.type != 0 && aoHit.t < 0.6) {
                     ao += 1.0;
                 }
             }
             float aoFactor = 1.0 - (ao / 4.0) * 0.6; 
-
-            float lightAttenuation = 1.0 / (1.0 + 0.05 * currentDist + 0.05 * (currentDist * currentDist));
             
-            vec3  ambient = uKa * uAmbientColor * texColor * aoFactor;
-            float ndotl   = max(dot(N, L), 0.0);
-            vec3  diffuse = uKd * ndotl * uLightColor * texColor * currentSpotIntensity * lightAttenuation;
-
-            float spec = 0.0;
-            if (ndotl > 0.0) {
-                bool uUseBlinn = true; 
-                if (uUseBlinn) {
-                    vec3 H = normalize(L + V + vec3(1e-5)); 
-                    spec = pow(max(dot(N, H), 0.0), uShininess);
-                } else {
-                    vec3 R = reflect(-L, N);
-                    spec = pow(max(dot(R, V), 0.0), uShininess);
+            vec3 ambient = uKa * uAmbientColor * texColor * aoFactor;
+            vec3 direct = ambient;
+            
+            for (int j = 0; j < numSpotBounces; ++j) {
+                vec3 L = normalize(vSpotPos[j] - hitPos);
+                float currentDist = length(vSpotPos[j] - hitPos);
+                float theta = dot(-L, vSpotDir[j]);
+                float epsilon = cos(radians(25.0)) - cos(radians(35.0));
+                float currentSpotIntensity = clamp((theta - cos(radians(35.0))) / epsilon, 0.0, 1.0);
+                
+                if (currentSpotIntensity > 0.0) {
+                    float shadowFactor = 1.0;
+                    vec3 shadowRo = hitPos + N * 1e-3; 
+                    Hit shadowHit = map(shadowRo, L, 2, playerPos, vPlayerPos[j]);
+                    
+                    if (shadowHit.type != 0 && shadowHit.type != 3 && shadowHit.t < currentDist) {
+                        shadowFactor = 0.0;
+                    }
+                    
+                    float lightAttenuation = 1.0 / (1.0 + 0.05 * currentDist + 0.05 * (currentDist * currentDist));
+                    float ndotl = max(dot(N, L), 0.0);
+                    vec3 diffuse = uKd * ndotl * uLightColor * texColor * currentSpotIntensity * lightAttenuation * vSpotAtten[j];
+                    
+                    float spec = 0.0;
+                    if (ndotl > 0.0) {
+                        bool uUseBlinn = true; 
+                        if (uUseBlinn) {
+                            vec3 H = normalize(L + V + vec3(1e-5)); 
+                            spec = pow(max(dot(N, H), 0.0), uShininess);
+                        } else {
+                            vec3 R = reflect(-L, N);
+                            spec = pow(max(dot(R, V), 0.0), uShininess);
+                        }
+                    }
+                    vec3 specular = uKs * spec * uLightColor * currentSpotIntensity * lightAttenuation * vSpotAtten[j];
+                    
+                    direct += (diffuse + specular) * shadowFactor;
                 }
             }
-            vec3 specular = uKs * spec * uLightColor * currentSpotIntensity * lightAttenuation;
             
-            vec3 direct = ambient + (diffuse + specular) * shadowFactor;
             color += attenuation * direct;
             break; 
         }
@@ -1266,8 +1314,21 @@ int main() {
                  glm::value_ptr(cameraUp));
 
     glm::vec3 headPos = playerPos + glm::vec3(0.0f, CAMERA_RADIUS, 0.0f);
+
+    // Cầm đèn pin bên tay phải (lệch ra ngoài quả bóng) để ánh sáng không bị
+    // cản bởi chính mình
+    glm::vec3 flatFront = glm::vec3(fpFront.x, 0.0f, fpFront.z);
+    if (glm::length(flatFront) < 0.0001f)
+      flatFront = glm::vec3(0.0f, 0.0f, -1.0f);
+    flatFront = glm::normalize(flatFront);
+    glm::vec3 playerRight =
+        glm::normalize(glm::cross(flatFront, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+    glm::vec3 spotLightPos = headPos + playerRight * 0.035f -
+                             glm::vec3(0.0f, 0.02f, 0.0f) + flatFront * 0.035f;
+
     glUniform3fv(glGetUniformLocation(rtProgram, "spotPos"), 1,
-                 glm::value_ptr(headPos));
+                 glm::value_ptr(spotLightPos));
     glUniform3fv(glGetUniformLocation(rtProgram, "spotDir"), 1,
                  glm::value_ptr(fpFront));
     glUniform1i(glGetUniformLocation(rtProgram, "isCCTV"), isCCTV ? 1 : 0);
@@ -1313,7 +1374,7 @@ int main() {
     glUniform3fv(glGetUniformLocation(stlProgram, "viewPos"), 1,
                  glm::value_ptr(currentCamPos));
     glUniform3fv(glGetUniformLocation(stlProgram, "lightPos"), 1,
-                 glm::value_ptr(headPos));
+                 glm::value_ptr(spotLightPos));
     glUniform3fv(glGetUniformLocation(stlProgram, "spotDir"), 1,
                  glm::value_ptr(fpFront));
     glUniform1f(glGetUniformLocation(stlProgram, "ceilY"), ceilY);
