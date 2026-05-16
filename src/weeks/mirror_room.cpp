@@ -12,6 +12,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#ifndef GL_TEXTURE_MAX_ANISOTROPY
+#define GL_TEXTURE_MAX_ANISOTROPY 0x84FE
+#endif
+#ifndef GL_MAX_TEXTURE_MAX_ANISOTROPY
+#define GL_MAX_TEXTURE_MAX_ANISOTROPY 0x84FF
+#endif
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
@@ -180,6 +187,10 @@ unsigned int loadTexture(char const *path) {
                     GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
+    float maxAniso = 1.0f;
+    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &maxAniso);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, maxAniso);
+
     stbi_image_free(data);
   } else {
     std::cout << "Texture failed to load at path: " << path << std::endl;
@@ -232,7 +243,7 @@ uniform float playerRadius;
 uniform mat4 view;
 uniform mat4 projection;
 
-#define MAX_BOUNCES 12
+#define MAX_BOUNCES 6
 
 float hitSegment(vec2 o, vec2 d, vec2 a, vec2 b, out vec3 normal) {
     vec2 v = b - a;
@@ -446,8 +457,11 @@ vec3 render(vec3 ro, vec3 rd, out Hit primaryHit, out vec3 primaryHitPos) {
             vec3 V = -rd; 
             vec3 texColor = objColor;
             
-            vec3 uAmbientColor = vec3(0.01, 0.01, 0.01); 
-            vec3 uLightColor   = vec3(1.0, 1.0, 1.0);  
+            vec3 L = normalize(lightPos - hitPos);
+            float currentDist = length(lightPos - hitPos);
+
+            vec3 uAmbientColor = vec3(0.15); // Khôi phục vật lý chuẩn (không fake)
+            vec3 uLightColor   = vec3(1.0, 1.0, 1.0);
             
             vec3 uKa = vec3(1.0); 
             vec3 uKd = vec3(1.0);
@@ -475,19 +489,87 @@ vec3 render(vec3 ro, vec3 rd, out Hit primaryHit, out vec3 primaryHitPos) {
             }
             float aoFactor = 1.0 - (ao / 4.0) * 0.6; 
             
-            vec3 ambient = uKa * uAmbientColor * texColor * aoFactor;
+            // === TRUE GLOBAL ILLUMINATION (1-Bounce Diffuse Color Bleeding) ===
+            vec3 indirectLight = vec3(0.0);
+            int NUM_GI_SAMPLES = 16; // Chỉnh về 16 tia để cân bằng giữa độ mượt và hiệu năng (FPS)
+            for(int gi = 0; gi < NUM_GI_SAMPLES; gi++) {
+                // Tạo hướng ngẫu nhiên trên bán cầu (Cosine-weighted hemisphere)
+                float r1 = fract(sin(dot(gl_FragCoord.xy + vec2(gi*13.0, gi*3.0), vec2(12.9898, 78.233))) * 43758.5453);
+                float r2 = fract(sin(dot(gl_FragCoord.xy + vec2(gi*7.0, gi*17.0), vec2(12.9898, 78.233))) * 43758.5453);
+                float theta = acos(sqrt(1.0 - r1));
+                float phi = 2.0 * 3.14159265 * r2;
+                
+                vec3 giDir = vec3(sin(theta)*cos(phi), cos(theta), sin(theta)*sin(phi));
+                
+                vec3 up = vec3(0.0, 1.0, 0.0);
+                if (abs(N.y) > 0.99) up = vec3(1.0, 0.0, 0.0);
+                vec3 right = normalize(cross(N, up));
+                vec3 fwd = cross(right, N);
+                vec3 sampleDir = right * giDir.x + N * giDir.y + fwd * giDir.z;
+                
+                vec3 giRo = hitPos + N * 1e-3;
+                Hit giHit = map(giRo, sampleDir, 1, playerPos);
+                
+                if (giHit.type != 0 && giHit.type != 3) {
+                    vec3 giHitPos = giRo + sampleDir * giHit.t;
+                    vec3 giL = normalize(lightPos - giHitPos);
+                    float giDist = length(lightPos - giHitPos);
+                    
+                    // Kiểm tra xem điểm hắt sáng có đang được đèn chiếu trực tiếp không
+                    Hit giShadow = map(giHitPos + giHit.normal * 1e-3, giL, 2, playerPos);
+                    if (!(giShadow.type != 0 && giShadow.type != 3 && giShadow.t < giDist)) {
+                        float giNdotL = max(dot(giHit.normal, giL), 0.0);
+                        float giAtten = 1.0 / (1.0 + 0.1 * giDist + 0.1 * giDist * giDist);
+                        
+                        vec3 giColor = vec3(0.6); 
+                        if (giHit.type == 4) giColor = vec3(1.0, 0.2, 0.2); // Quả bóng đỏ hắt ánh sáng đỏ (Color Bleeding)
+                        if (giHit.type == 5) giColor = vec3(0.3, 0.4, 0.5); 
+                        if (giHit.type == 1) giColor = vec3(0.5); // Sàn nhà
+                        
+                        indirectLight += giColor * giNdotL * giAtten;
+                    }
+                }
+            }
+            indirectLight /= float(NUM_GI_SAMPLES);
+            
+            // Kết hợp ánh sáng nền cơ bản (0.02) và Ánh sáng nảy vật lý (GI)
+            vec3 ambient = uKa * (vec3(0.02) + indirectLight * 0.8) * texColor * aoFactor;
             vec3 direct = ambient;
             
-            vec3 L = normalize(lightPos - hitPos);
-            float currentDist = length(lightPos - hitPos);
             
-            float shadowFactor = 1.0;
+            // THẬT NHẤT: Area Light Soft Shadows (Bóng mềm vật lý chuẩn)
+            // Thay vì coi đèn là 1 điểm vô hình (gây ra bóng sắc lẹm), ta coi đèn là 1 khối cầu có bán kính.
+            // Bắn 9 tia phân bố đều lên bề mặt bóng đèn để lấy bóng mờ (Penumbra) tuyệt đối vật lý.
+            float shadowFactor = 0.0;
+            float lightRadius = 0.04; // Giảm kích thước đèn để bớt vỡ hạt
+            int numSamples = 16;      // Chỉnh về 16 tia để cân bằng hiệu năng
+            
+            vec3 lightUp = vec3(0.0, 1.0, 0.0);
+            if (abs(L.y) > 0.99) lightUp = vec3(1.0, 0.0, 0.0);
+            vec3 lightRight = normalize(cross(L, lightUp));
+            vec3 lightUpReal = cross(lightRight, L);
+            
+            // Hàm sinh số ngẫu nhiên dựa trên tọa độ pixel trên màn hình
+            float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+            float angleOffset = noise * 6.283185; // Quay góc ngẫu nhiên từ 0 đến 2PI
+            
             vec3 shadowRo = hitPos + N * 1e-3; 
-            Hit shadowHit = map(shadowRo, L, 2, playerPos);
-            
-            if (shadowHit.type != 0 && shadowHit.type != 3 && shadowHit.t < currentDist) {
-                shadowFactor = 0.0;
+            for(int s = 0; s < numSamples; s++) {
+                // Thuật toán xoắn ốc Fibonacci (Vogel's Disk)
+                float r = sqrt(float(s) + 0.5) / sqrt(float(numSamples));
+                float theta = float(s) * 2.3999632 + angleOffset; 
+                vec3 offset = (lightRight * cos(theta) + lightUpReal * sin(theta)) * r * lightRadius;
+                
+                vec3 targetLight = lightPos + offset;
+                vec3 dirLight = normalize(targetLight - hitPos);
+                float distLight = length(targetLight - hitPos);
+                
+                Hit shadowHit = map(shadowRo, dirLight, 2, playerPos);
+                if (!(shadowHit.type != 0 && shadowHit.type != 3 && shadowHit.t < distLight)) {
+                    shadowFactor += 1.0;
+                }
             }
+            shadowFactor /= float(numSamples);
             
             float lightAttenuation = 1.0 / (1.0 + 0.1 * currentDist + 0.1 * (currentDist * currentDist));
             float ndotl = max(dot(N, L), 0.0);
@@ -1024,8 +1106,9 @@ void processInput(GLFWwindow *window) {
   playerPos = moveWithCollision(playerPos, delta);
   
   float newY = GROUND_Y + EYE_HEIGHT + playerHeightOffset;
-  if (newY > CEIL_Y - CAMERA_RADIUS) {
-    newY = CEIL_Y - CAMERA_RADIUS;
+  // Giữ khoảng cách an toàn với trần nhà (tránh camera chọc thủng trần)
+  if (newY > CEIL_Y - CAMERA_RADIUS * 2.5f) {
+    newY = CEIL_Y - CAMERA_RADIUS * 2.5f;
     playerHeightOffset = newY - (GROUND_Y + EYE_HEIGHT);
   }
   if (newY < GROUND_Y + CAMERA_RADIUS) {
