@@ -55,6 +55,8 @@ glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
 
 bool isCCTV = false;
 bool cKeyPressed = false;
+bool cctvFilterEnabled = true;
+bool oKeyPressed = false;
 
 glm::vec3 cctvPos(0.0f, 0.0f, 0.0f);
 float cctvYaw = -90.0f;
@@ -224,6 +226,8 @@ uniform vec3 cameraUp;
 
 uniform vec3 lightPos;
 uniform bool isCCTV;
+uniform bool cctvFilterEnabled;
+uniform float iTime;
 
 uniform sampler2D floorTexture;
 
@@ -619,6 +623,27 @@ void main() {
     }
     totalColor *= 0.25; // Trung bình cộng 4 samples
     
+    if (isCCTV && cctvFilterEnabled) {
+        // Chuyển sang ảnh xám
+        float lum = dot(totalColor, vec3(0.299, 0.587, 0.114));
+        
+        // Ám màu xanh lá đặc trưng của Night Vision / CCTV
+        totalColor = vec3(0.1, 0.9, 0.2) * lum;
+        
+        // Hiệu ứng nhiễu vệt ngang (Scanlines)
+        float scanline = sin(TexCoords.y * 800.0) * 0.04;
+        totalColor -= vec3(scanline);
+        
+        // Hiệu ứng nhiễu hạt (Static noise)
+        float noise = fract(sin(dot(TexCoords + fract(iTime), vec2(12.9898, 78.233))) * 43758.5453);
+        totalColor += vec3(noise * 0.15);
+        
+        // Làm tối góc (Vignette)
+        vec2 centerDist = TexCoords - 0.5;
+        float vignette = smoothstep(0.8, 0.3, length(centerDist));
+        totalColor *= vignette;
+    }
+
     totalColor = totalColor / (totalColor + vec3(1.0)); // Tone mapping
     totalColor = pow(totalColor, vec3(1.0/2.2)); // Gamma correction
     
@@ -1078,6 +1103,15 @@ void processInput(GLFWwindow *window) {
     cKeyPressed = false;
   }
 
+  if (glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS) {
+    if (!oKeyPressed) {
+      cctvFilterEnabled = !cctvFilterEnabled;
+      oKeyPressed = true;
+    }
+  } else {
+    oKeyPressed = false;
+  }
+
   float velocity = speed * deltaTime;
 
   glm::vec3 flatFront = glm::vec3(fpFront.x, 0.0f, fpFront.z);
@@ -1104,7 +1138,7 @@ void processInput(GLFWwindow *window) {
     playerHeightOffset -= speed * deltaTime;
 
   playerPos = moveWithCollision(playerPos, delta);
-  
+
   float newY = GROUND_Y + EYE_HEIGHT + playerHeightOffset;
   // Giữ khoảng cách an toàn với trần nhà (tránh camera chọc thủng trần)
   // Bán kính camera = 0.06. Giói hạn bay cách trần 1 chút
@@ -1366,18 +1400,20 @@ int main() {
     // Nguồn sáng ở trên đầu người chơi
     glm::vec3 overheadLightPos = playerPos + glm::vec3(0.0f, 0.4f, 0.0f);
     if (overheadLightPos.y > ceilY - 0.05f) {
-        overheadLightPos.y = ceilY - 0.05f; // Không cho đèn lọt lên trên trần nhà
+      overheadLightPos.y = ceilY - 0.05f; // Không cho đèn lọt lên trên trần nhà
     }
 
     glUniform3fv(glGetUniformLocation(rtProgram, "lightPos"), 1,
                  glm::value_ptr(overheadLightPos));
     glUniform1i(glGetUniformLocation(rtProgram, "isCCTV"), isCCTV ? 1 : 0);
+    glUniform1i(glGetUniformLocation(rtProgram, "cctvFilterEnabled"), cctvFilterEnabled ? 1 : 0);
+    glUniform1f(glGetUniformLocation(rtProgram, "iTime"), currentFrame);
 
     glUniform1f(glGetUniformLocation(rtProgram, "fov"), fov);
     glUniform1f(glGetUniformLocation(rtProgram, "aspectRatio"),
                 (float)SCR_WIDTH / (float)SCR_HEIGHT);
-    glUniform2f(glGetUniformLocation(rtProgram, "resolution"),
-                (float)SCR_WIDTH, (float)SCR_HEIGHT);
+    glUniform2f(glGetUniformLocation(rtProgram, "resolution"), (float)SCR_WIDTH,
+                (float)SCR_HEIGHT);
 
     glUniform1i(glGetUniformLocation(rtProgram, "numSegments"),
                 g_collisionSegments.size());
