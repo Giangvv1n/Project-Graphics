@@ -86,7 +86,7 @@ const float EYE_HEIGHT = 0.12f;
 const float COLLISION_SLICE_HEIGHT = 0.12f;
 
 // bán kính va chạm
-const float CAMERA_RADIUS = 0.03f;
+const float CAMERA_RADIUS = 0.06f;
 
 // lọc gần-đứng
 const float WALL_NORMAL_Y_LIMIT = 0.65f;
@@ -243,7 +243,7 @@ uniform float playerRadius;
 uniform mat4 view;
 uniform mat4 projection;
 
-#define MAX_BOUNCES 6
+#define MAX_BOUNCES 12
 
 float hitSegment(vec2 o, vec2 d, vec2 a, vec2 b, out vec3 normal) {
     vec2 v = b - a;
@@ -1107,8 +1107,9 @@ void processInput(GLFWwindow *window) {
   
   float newY = GROUND_Y + EYE_HEIGHT + playerHeightOffset;
   // Giữ khoảng cách an toàn với trần nhà (tránh camera chọc thủng trần)
-  if (newY > CEIL_Y - CAMERA_RADIUS * 2.5f) {
-    newY = CEIL_Y - CAMERA_RADIUS * 2.5f;
+  // Bán kính camera = 0.06. Giói hạn bay cách trần 1 chút
+  if (newY > CEIL_Y - 0.1f) {
+    newY = CEIL_Y - 0.1f; // độ cao giới hạn khi bay
     playerHeightOffset = newY - (GROUND_Y + EYE_HEIGHT);
   }
   if (newY < GROUND_Y + CAMERA_RADIUS) {
@@ -1276,7 +1277,7 @@ int main() {
 
   CEIL_Y = worldMax.y;
   float ceilY = CEIL_Y;
-  float sliceY = GROUND_Y + (ceilY - GROUND_Y) * 0.5f;
+  float sliceY = GROUND_Y + COLLISION_SLICE_HEIGHT;
 
   buildCollisionSegmentsFromSlice(modelVertices, modelMatrix, sliceY);
 
@@ -1315,7 +1316,7 @@ int main() {
     }
   }
 
-  cctvPos = glm::vec3(bestCornerP.x, ceilY - 0.01f, bestCornerP.y);
+  cctvPos = glm::vec3(bestCornerP.x, ceilY - 0.1f, bestCornerP.y);
   cctvFront =
       glm::normalize(glm::vec3(playerPos.x, GROUND_Y, playerPos.z) - cctvPos);
   cctvPitch = glm::degrees(asin(cctvFront.y));
@@ -1345,7 +1346,7 @@ int main() {
     glm::vec3 currentCamFront = isCCTV ? cctvFront : fpFront;
 
     glm::mat4 projection = glm::perspective(
-        glm::radians(fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+        glm::radians(fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.01f, 100.0f);
     glm::mat4 view =
         glm::lookAt(currentCamPos, currentCamPos + currentCamFront, cameraUp);
     glUniformMatrix4fv(glGetUniformLocation(rtProgram, "projection"), 1,
